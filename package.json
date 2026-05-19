@@ -1,0 +1,26 @@
+{
+  "name": "@axolot-ai/sdk",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./components": "./dist/components/index.js",
+    "./cms": "./dist/lib/cms.js"
+  },
+  "files": [
+    "dist",
+    "src/components/*.astro"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "astro": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

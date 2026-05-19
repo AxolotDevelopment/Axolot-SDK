@@ -1,0 +1,97 @@
+---
+/**
+ *  Axolot CMS — Sync Bridge
+ * Este componente sincroniza automáticamente la estructura de páginas local
+ * con el Dashboard de producción cuando estás en modo desarrollo.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+
+const siteId = (import.meta.env.PUBLIC_AXOLOT_SITE_ID || import.meta.env.AXOLOT_SITE_ID);
+const rawApiUrl = (import.meta.env.PUBLIC_AXOLOT_API_URL || import.meta.env.AXOLOT_API_URL);
+const isDev = import.meta.env.DEV;
+
+// Si estamos en dev y no hay URL, usamos localhost:3001 por defecto
+const baseUrl = (rawApiUrl || (isDev ? 'http://localhost:3001' : 'https://api.axolotcms.com')).replace(/\/api\/v1\/?$/, '');
+const apiUrl = `${baseUrl}/api/v1`;
+
+console.log(`[Axolot Bridge] Resolving API to: ${baseUrl} (Source: ${rawApiUrl ? 'ENV' : 'DEFAULT'})`);
+const apiToken = (import.meta.env.PUBLIC_AXOLOT_API_TOKEN || import.meta.env.AXOLOT_API_TOKEN);
+
+// Solo ejecutamos el sync en el servidor y en modo DEV
+if (isDev && siteId && apiToken) {
+  try {
+    const pagesDir = path.join(process.cwd(), 'src', 'pages');
+    const discoveredPages: { title: string, slug: string }[] = [];
+
+    function scanDir(dir: string, baseRoute = '') {
+      if (!fs.existsSync(dir)) return;
+      const items = fs.readdirSync(dir);
+      for (const item of items) {
+        const fullPath = path.join(dir, item);
+        const stats = fs.statSync(fullPath);
+        if (stats.isDirectory()) {
+          scanDir(fullPath, `${baseRoute}/${item}`);
+        } else if (item.endsWith('.astro') || item.endsWith('.md') || item.endsWith('.mdx')) {
+          let slug = '';
+          const name = item.replace(/\.(astro|md|mdx)$/, '');
+          
+          if (name.startsWith('_') || name.startsWith('.')) continue;
+
+          if (name === 'index') {
+            slug = baseRoute === '' ? '/' : baseRoute;
+          } else {
+            slug = `${baseRoute}/${name}`;
+          }
+
+          if (slug.includes('[') || slug.includes('...')) continue;
+
+          const title = name === 'index' && baseRoute !== '' 
+            ? baseRoute.split('/').pop()?.replace(/-/g, ' ') || 'Página'
+            : name.replace(/-/g, ' ');
+          
+          const capitalizedTitle = title.charAt(0).toUpperCase() + title.slice(1);
+          
+          discoveredPages.push({
+            title: capitalizedTitle === 'Index' ? 'Inicio' : capitalizedTitle,
+            slug: slug === '' ? '/' : slug
+          });
+        }
+      }
+    }
+
+    scanDir(pagesDir);
+
+    if (discoveredPages.length > 0) {
+      fetch(`${apiUrl}/sites/${siteId}/pages/report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiToken}`
+        },
+        body: JSON.stringify({ pages: discoveredPages })
+      })
+      .then(r => r.json())
+      .catch(err => {
+        if (typeof window === 'undefined') {
+          console.error(' [Axolot Bridge] Error de conexión con la API:', err.message);
+        }
+      });
+    }
+  } catch (e) {
+    console.error(' [Axolot Bridge] Error al escanear páginas locales:', e);
+  }
+}
+---
+<!-- Axolot Bridge Active -->
+<script is:inline define:vars={{ siteId, baseUrl }}>
+  window.AXOLOT_SITE_ID = window.AXOLOT_SITE_ID || siteId;
+  window.AXOLOT_API_URL = window.AXOLOT_API_URL || baseUrl;
+  
+  if (window.AXOLOT_SITE_ID && typeof window.initAxolot === 'function') {
+    console.log(' [Axolot Bridge] Re-initializing with Site ID:', window.AXOLOT_SITE_ID);
+    window.initAxolot(window.AXOLOT_SITE_ID);
+  }
+</script>
+<script is:inline src={`${baseUrl}/assets/axolot-core.js?v=${Date.now()}`} id="axolot-core-script"></script>
+<div id="axolot-nav" class="fixed top-0 left-0 right-0 z-[9999]"></div>
