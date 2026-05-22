@@ -14,13 +14,16 @@
     "src/components/*.astro"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "astro": "^5.0.0"
+    "astro": "^5.0.0",
+    "localtunnel": "^2.0.2"
   },
   "devDependencies": {
+    "@types/localtunnel": "^2.0.4",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3"
   }
 }

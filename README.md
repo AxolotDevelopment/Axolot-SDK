@@ -54,7 +54,7 @@ import { AxolotBridge } from '@axolot-ai/sdk/components';
 
 ## Documentation
 
-Full documentation available at [axolot-cms.com/docs](https://axolot-cms.com/docs).
+Full documentation available at [axolotcms.com/docs](https://axolotcms.com/docs).
 
 ## License
 

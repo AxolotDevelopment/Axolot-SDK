@@ -42,3 +42,17 @@ export function getMediaUrl(path: string | null | undefined) {
   const API_URL = (typeof process !== 'undefined' ? process.env.AXOLOT_API_URL : import.meta.env?.AXOLOT_API_URL) || 'https://api.axolotcms.com';
   return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
 }
+
+export async function getTestimonials(siteId: string) {
+  return await fetchFromCms(`/modules/${siteId}/testimonials`);
+}
+
+export async function getFaqs(siteId: string) {
+  return await fetchFromCms(`/modules/${siteId}/faqs`);
+}
+
+export async function getCustomModuleRows(siteId: string, tableName: string) {
+  return await fetchFromCms(`/modules/${siteId}/custom/${tableName}`);
+}
+
+
