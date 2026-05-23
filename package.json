@@ -1,6 +1,14 @@
 {
   "name": "@axolot-ai/sdk",
-  "version": "0.0.1",
+  "version": "0.0.2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AxolotDevelopment/Axolot-SDK.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AxolotDevelopment/Axolot-SDK/issues"
+  },
+  "homepage": "https://github.com/AxolotDevelopment/Axolot-SDK#readme",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
