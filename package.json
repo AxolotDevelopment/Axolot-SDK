@@ -1,6 +1,7 @@
 {
   "name": "@axolot-ai/sdk",
-  "version": "0.0.2",
+  "version": "0.0.3",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AxolotDevelopment/Axolot-SDK.git"
