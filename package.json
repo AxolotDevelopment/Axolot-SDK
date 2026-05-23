@@ -5,9 +5,18 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./components": "./dist/components/index.js",
-    "./cms": "./dist/lib/cms.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "default": "./dist/components/index.js"
+    },
+    "./cms": {
+      "types": "./dist/lib/cms.d.ts",
+      "default": "./dist/lib/cms.js"
+    }
   },
   "files": [
     "dist",
@@ -19,10 +28,10 @@
   },
   "dependencies": {
     "astro": "^5.0.0",
-    "localtunnel": "^2.0.2"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/localtunnel": "^2.0.4",
+    "@types/ws": "^8.5.14",
     "tsup": "^8.5.1",
     "typescript": "^5.8.3"
   }

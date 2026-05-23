@@ -1,12 +1,38 @@
 import type { AstroIntegration } from 'astro';
+import { startAxolotTunnel } from './tunnel-client.js';
 import * as fs from 'node:fs/promises';
+import * as fsSync from 'node:fs';
 import * as path from 'node:path';
+
+function loadEnvFile() {
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    if (fsSync.existsSync(envPath)) {
+      const content = fsSync.readFileSync(envPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const index = trimmed.indexOf('=');
+        if (index > 0) {
+          const key = trimmed.slice(0, index).trim();
+          const val = trimmed.slice(index + 1).trim().replace(/^['"]|['"]$/g, '');
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error(' [Axolot SDK] Failed to load local .env file:', err);
+  }
+}
 
 /**
  *  Axolot CMS — Astro Integration
  * Bridge centralizado y sin dependencias externas.
  */
 export default function axolot(): AstroIntegration {
+  loadEnvFile();
   return {
     name: '@axolot/sdk',
     hooks: {
@@ -18,8 +44,10 @@ export default function axolot(): AstroIntegration {
             
             // Prioridad 1: Variables inyectadas desde el servidor (si existen)
             // Prioridad 2: Fallback dinámico basado en el entorno
+            let rawUrl = "${process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL || ''}";
+            if (rawUrl.includes(':3002')) rawUrl = rawUrl.replace(':3002', ':3001');
             window.AXOLOT_SITE_ID = window.AXOLOT_SITE_ID || "${process.env.PUBLIC_AXOLOT_SITE_ID || process.env.AXOLOT_SITE_ID || ''}";
-            window.AXOLOT_API_URL = window.AXOLOT_API_URL || "${process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL || ''}" 
+            window.AXOLOT_API_URL = window.AXOLOT_API_URL || rawUrl 
               || (isLocal || ${isDev} ? 'http://localhost:3001' : 'https://api.axolotcms.com');
             
             console.log(' [Axolot] SDK Configured:', { 
@@ -107,102 +135,89 @@ export default function axolot(): AstroIntegration {
           }
         }
 
-        //  START SECURE TUNNEL TO PRODUCTION
+        //  START SECURE TUNNEL TO PRODUCTION (WebSocket-based, no extra TCP ports)
         async function startTunnel() {
           const siteId = process.env.PUBLIC_AXOLOT_SITE_ID || process.env.AXOLOT_SITE_ID;
           const apiToken = process.env.PUBLIC_AXOLOT_API_TOKEN || process.env.AXOLOT_API_TOKEN;
           const rawApiUrl = process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL;
-          
+          const tunnelHost = process.env.PUBLIC_AXOLOT_TUNNEL_HOST || process.env.AXOLOT_TUNNEL_HOST;
+
           if (!siteId || !apiToken) {
-            console.log(' [Axolot Tunnel] Skipping tunnel: Site ID or API Token not found in process.env');
+            console.log(' [Axolot Tunnel] Skipping tunnel: Site ID or API Token not found in process.env');
             return;
           }
-          
+
+          if (!tunnelHost) {
+            console.log(' [Axolot Tunnel] Skipping tunnel: AXOLOT_TUNNEL_HOST not configured.');
+            return;
+          }
+
           const baseUrl = (rawApiUrl || 'http://localhost:3001').replace(/\/api\/v1\/?$/, '');
           const apiUrl = `${baseUrl}/api/v1`;
-          
+
           async function runTunnel(port: number) {
+            // 1. Fetch site stagingDomain or slug to use as subdomain
+            let subdomainPrefix = '';
             try {
-              // 1. Get site slug to try as subdomain
-              let siteSlug = '';
-              try {
-                const res = await fetch(`${apiUrl}/sites/${siteId}`, {
-                  headers: { 'Authorization': `Bearer ${apiToken}` }
-                });
-                if (res.ok) {
-                  const siteData = await res.json() as any;
-                  siteSlug = siteData.slug;
-                }
-              } catch (err: any) {
-                console.log(' [Axolot Tunnel] Could not fetch site details:', err.message);
-              }
-              
-              console.log(` [Axolot Tunnel] Connecting local port ${port} to Axolot Cloud...`);
-              
-              const lt = (await import('localtunnel')).default;
-              let tunnel: any;
-              
-              try {
-                // Try utilizing the slug as subdomain
-                tunnel = await lt({ port, subdomain: siteSlug || undefined });
-              } catch (err) {
-                // Fallback to random subdomain
-                tunnel = await lt({ port });
-              }
-              
-              const tunnelUrl = tunnel.url;
-              console.log(` [Axolot Tunnel] Tunnel created successfully: \x1b[36m${tunnelUrl}\x1b[0m -> http://localhost:${port}`);
-              
-              // 2. Register this tunnelUrl in production database
-              const patchRes = await fetch(`${apiUrl}/sites/${siteId}`, {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${apiToken}`
-                },
-                body: JSON.stringify({ stagingUrl: tunnelUrl })
+              const res = await fetch(`${apiUrl}/sites/${siteId}`, {
+                headers: { 'Authorization': `Bearer ${apiToken}` }
               });
-              
-              if (patchRes.ok) {
-                console.log(' [Axolot Tunnel] Tunnel URL registered in production database.');
-              } else {
-                console.error(' [Axolot Tunnel] Failed to register tunnel URL in database:', patchRes.statusText);
+              if (res.ok) {
+                const siteData = await res.json() as any;
+                if (siteData.stagingDomain) {
+                  subdomainPrefix = siteData.stagingDomain.split('.')[0];
+                } else {
+                  subdomainPrefix = siteData.slug || '';
+                }
               }
-              
-              // 3. Clear tunnel URL on exit/SIGINT/SIGTERM
-              const cleanup = async () => {
-                console.log(' [Axolot Tunnel] Disconnecting tunnel and clearing remote staging URL...');
+            } catch (err: any) {
+              console.log(' [Axolot Tunnel] Could not fetch site info:', err.message);
+            }
+
+            // 2. Start WebSocket tunnel (no extra TCP ports needed)
+            const stopTunnel = startAxolotTunnel({
+              port,
+              host: tunnelHost as string,
+              subdomain: subdomainPrefix || undefined,
+              onConnect: async (tunnelUrl: string) => {
+                // 3. Register tunnel URL in production database
                 try {
-                  tunnel.close();
-                  await fetch(`${apiUrl}/sites/${siteId}`, {
+                  const patchRes = await fetch(`${apiUrl}/sites/${siteId}`, {
                     method: 'PATCH',
                     headers: {
                       'Content-Type': 'application/json',
                       'Authorization': `Bearer ${apiToken}`
                     },
-                    body: JSON.stringify({ stagingUrl: null })
+                    body: JSON.stringify({ stagingUrl: tunnelUrl })
                   });
-                } catch (e) {}
-              };
-              
-              process.on('SIGINT', async () => {
-                await cleanup();
-                process.exit(0);
-              });
-              
-              process.on('SIGTERM', async () => {
-                await cleanup();
-                process.exit(0);
-              });
-              
-              // Astro dev server close hook or process exit
-              server.httpServer?.on('close', async () => {
-                await cleanup();
-              });
-              
-            } catch (err: any) {
-              console.error(' [Axolot Tunnel] Failed to start tunnel:', err.message);
-            }
+                  if (patchRes.ok) {
+                    console.log(' [Axolot Tunnel] Tunnel URL registered in database.');
+                  }
+                } catch (e: any) {
+                  console.error(' [Axolot Tunnel] Failed to register tunnel URL:', e.message);
+                }
+              },
+            });
+
+            // 4. Cleanup on exit
+            const cleanup = async () => {
+              console.log(' [Axolot Tunnel] Disconnecting tunnel...');
+              stopTunnel();
+              try {
+                await fetch(`${apiUrl}/sites/${siteId}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiToken}`
+                  },
+                  body: JSON.stringify({ stagingUrl: null })
+                });
+              } catch (e) {}
+            };
+
+            process.on('SIGINT', async () => { await cleanup(); process.exit(0); });
+            process.on('SIGTERM', async () => { await cleanup(); process.exit(0); });
+            server.httpServer?.on('close', cleanup);
           }
 
           const defaultPort = server.config.server.port || 4321;

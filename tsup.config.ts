@@ -10,7 +10,7 @@ export default defineConfig({
   dts: true,
   clean: true,
   shims: true,
-  external: ['astro', 'node:fs', 'node:path', 'node:fs/promises', './AxolotBridge.astro'],
+  external: ['astro', 'node:fs', 'node:path', 'node:fs/promises', './AxolotBridge.astro', 'ws'],
   async onSuccess() {
     const fs = await import('node:fs/promises')
     const path = await import('node:path')

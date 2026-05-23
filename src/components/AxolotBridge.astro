@@ -12,7 +12,10 @@ const rawApiUrl = (import.meta.env.PUBLIC_AXOLOT_API_URL || import.meta.env.AXOL
 const isDev = import.meta.env.DEV;
 
 // Si estamos en dev y no hay URL, usamos localhost:3001 por defecto
-const baseUrl = (rawApiUrl || (isDev ? 'http://localhost:3001' : 'https://api.axolotcms.com')).replace(/\/api\/v1\/?$/, '');
+let baseUrl = (rawApiUrl || (isDev ? 'http://localhost:3001' : 'https://api.axolotcms.com')).replace(/\/api\/v1\/?$/, '');
+if (baseUrl.includes(':3002')) {
+  baseUrl = baseUrl.replace(':3002', ':3001');
+}
 const apiUrl = `${baseUrl}/api/v1`;
 
 console.log(`[Axolot Bridge] Resolving API to: ${baseUrl} (Source: ${rawApiUrl ? 'ENV' : 'DEFAULT'})`);
