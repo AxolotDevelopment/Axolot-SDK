@@ -127,7 +127,7 @@ All endpoints are strictly authenticated using your `AXOLOT_API_TOKEN` and secur
 ## 🔗 Useful Links
 
 *   **Official Website**: [axolotcms.com](https://axolotcms.com)
-*   **Client Dashboard**: [app.axolotcms.com](https://app.axolotcms.com)
+*   **Client Dashboard**: [ai.axolotcms.com](https://ai.axolotcms.com)
 *   **Documentation & API Reference**: [axolotcms.com/docs](https://axolotcms.com/docs)
 *   **Hosting Partner**: [oaxhosting.com](https://oaxhosting.com)
 
