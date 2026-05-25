@@ -9,31 +9,45 @@ export async function fetchFromCms(path: string, options: RequestInit = {}) {
   const API_URL = (typeof process !== 'undefined' ? (process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL) : (import.meta.env?.PUBLIC_AXOLOT_API_URL || import.meta.env?.AXOLOT_API_URL)) || defaultUrl;
   const token = (typeof process !== 'undefined' ? process.env.AXOLOT_API_TOKEN : import.meta.env?.AXOLOT_API_TOKEN);
 
-  console.log(` [Axolot Debug] Fetching from: ${API_URL}/api/v1${path}`);
+  // Normalize base URL to prevent duplicate /api/v1
+  let baseUrl = API_URL.trim();
+  if (baseUrl.endsWith('/api/v1')) {
+    baseUrl = baseUrl.slice(0, -7);
+  } else if (baseUrl.endsWith('/api/v1/')) {
+    baseUrl = baseUrl.slice(0, -8);
+  }
+  baseUrl = baseUrl.replace(/\/$/, '');
+
+  console.log(` [Axolot Debug] Fetching from: ${baseUrl}/api/v1${path}`);
   console.log(` [Axolot Debug] Token present: ${token ? 'YES (' + token.substring(0, 10) + '...)' : 'NO'}`);
 
-  const res = await fetch(`${API_URL}/api/v1${path}`, {
-    ...options,
-    headers: {
-      ...options.headers,
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-    },
-  })
+  try {
+    const res = await fetch(`${baseUrl}/api/v1${path}`, {
+      ...options,
+      headers: {
+        ...options.headers,
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+    })
 
-  if (!res.ok) {
-    console.error(` [Axolot] CMS Fetch Error: ${res.status} ${res.statusText} on ${path}`)
-    return null
+    if (!res.ok) {
+      console.error(` [Axolot] CMS Fetch Error: ${res.status} ${res.statusText} on ${path}`)
+      return null
+    }
+
+    const contentType = res.headers.get('content-type')
+    if (contentType && !contentType.includes('application/json')) {
+      const text = await res.text()
+      console.error(` [Axolot] Expected JSON but received ${contentType}. Check if your API is returning an error page or Localtunnel protection is active.`)
+      return null
+    }
+
+    return await res.json()
+  } catch (err: any) {
+    console.warn(` [Axolot Bridge] Connection failed to CMS API at ${baseUrl}/api/v1${path}:`, err.message);
+    return null;
   }
-
-  const contentType = res.headers.get('content-type')
-  if (contentType && !contentType.includes('application/json')) {
-    const text = await res.text()
-    console.error(` [Axolot] Expected JSON but received ${contentType}. Check if your API is returning an error page or Localtunnel protection is active.`)
-    throw new Error(`API returned ${contentType} instead of JSON. Head is: ${text.slice(0, 100)}`)
-  }
-
-  return await res.json()
 }
 
 export function getMediaUrl(path: string | null | undefined) {
