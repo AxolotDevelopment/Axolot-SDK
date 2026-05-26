@@ -74,7 +74,13 @@ export default function axolot(): AstroIntegration {
             return;
           }
           
-          const baseUrl = (rawApiUrl || 'http://localhost:3001').replace(/\/api\/v1\/?$/, '');
+          let baseUrl = (rawApiUrl || 'http://localhost:3001').trim();
+          if (baseUrl.endsWith('/api/v1')) {
+            baseUrl = baseUrl.slice(0, -7);
+          } else if (baseUrl.endsWith('/api/v1/')) {
+            baseUrl = baseUrl.slice(0, -8);
+          }
+          baseUrl = baseUrl.replace(/\/$/, '');
           const apiUrl = `${baseUrl}/api/v1`;
           
           try {
@@ -152,7 +158,13 @@ export default function axolot(): AstroIntegration {
             return;
           }
 
-          const baseUrl = (rawApiUrl || 'http://localhost:3001').replace(/\/api\/v1\/?$/, '');
+          let baseUrl = (rawApiUrl || 'http://localhost:3001').trim();
+          if (baseUrl.endsWith('/api/v1')) {
+            baseUrl = baseUrl.slice(0, -7);
+          } else if (baseUrl.endsWith('/api/v1/')) {
+            baseUrl = baseUrl.slice(0, -8);
+          }
+          baseUrl = baseUrl.replace(/\/$/, '');
           const apiUrl = `${baseUrl}/api/v1`;
 
           async function runTunnel(port: number) {
