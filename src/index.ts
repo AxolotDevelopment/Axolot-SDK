@@ -170,6 +170,22 @@ export default function axolot(): AstroIntegration {
           async function runTunnel(port: number) {
             // 1. Fetch site stagingDomain or slug to use as subdomain
             let subdomainPrefix = '';
+            let fallbackSubdomain = '';
+            try {
+              const pkgJsonPath = path.join(process.cwd(), 'package.json');
+              if (fsSync.existsSync(pkgJsonPath)) {
+                const pkg = JSON.parse(fsSync.readFileSync(pkgJsonPath, 'utf-8'));
+                if (pkg.name && pkg.name.startsWith('site-')) {
+                  fallbackSubdomain = pkg.name.substring(5);
+                } else if (pkg.name) {
+                  fallbackSubdomain = pkg.name;
+                }
+              }
+              if (!fallbackSubdomain) {
+                fallbackSubdomain = path.basename(process.cwd());
+              }
+            } catch (e) {}
+
             try {
               const res = await fetch(`${apiUrl}/sites/${siteId}`, {
                 headers: { 'Authorization': `Bearer ${apiToken}` }
@@ -181,16 +197,21 @@ export default function axolot(): AstroIntegration {
                 } else {
                   subdomainPrefix = siteData.slug || '';
                 }
+              } else {
+                console.log(' [Axolot Tunnel] Site fetch responded with status:', res.status);
               }
             } catch (err: any) {
               console.log(' [Axolot Tunnel] Could not fetch site info:', err.message);
             }
 
+            const chosenSubdomain = subdomainPrefix || fallbackSubdomain || undefined;
+            console.log(' [Axolot Tunnel] Initializing tunnel with subdomain:', chosenSubdomain);
+
             // 2. Start WebSocket tunnel (no extra TCP ports needed)
             const stopTunnel = startAxolotTunnel({
               port,
               host: tunnelHost as string,
-              subdomain: subdomainPrefix || undefined,
+              subdomain: chosenSubdomain,
               onConnect: async (tunnelUrl: string) => {
                 // 3. Register tunnel URL in production database
                 try {
