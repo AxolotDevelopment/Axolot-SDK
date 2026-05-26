@@ -220,7 +220,7 @@ export default function axolot(): AstroIntegration {
             server.httpServer?.on('close', cleanup);
           }
 
-          const defaultPort = server.config.server.port || 4321;
+          const defaultPort = parseInt(process.env.PORT || '') || server.config.server.port || 4321;
           if (server.httpServer) {
             if (server.httpServer.listening) {
               const address = server.httpServer.address();
