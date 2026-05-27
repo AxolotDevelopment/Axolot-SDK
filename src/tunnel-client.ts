@@ -108,6 +108,8 @@ export function startAxolotTunnel(options: AxolotTunnelOptions): () => void {
   let ws: any = null;
   let stopped = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   function connect() {
     if (stopped) return;
@@ -135,7 +137,15 @@ export function startAxolotTunnel(options: AxolotTunnelOptions): () => void {
 
         if (msg.type === 'connected') {
           console.log(` ✅ [Axolot Tunnel] Tunnel active: \x1b[36m${msg.url}\x1b[0m → http://localhost:${port}`);
+          reconnectAttempts = 0;
           onConnect?.(msg.url);
+
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          heartbeatTimer = setInterval(() => {
+            if (ws?.readyState === 1 /* OPEN */) {
+              ws.ping();
+            }
+          }, 30000);
           return;
         }
 
@@ -158,17 +168,20 @@ export function startAxolotTunnel(options: AxolotTunnelOptions): () => void {
 
       ws.on('close', () => {
         if (stopped) return;
-        console.log(' ⚠️  [Axolot Tunnel] Connection lost. Reconnecting in 5s...');
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        reconnectAttempts++;
+        const nextDelay = Math.min(5000 * Math.pow(1.5, reconnectAttempts - 1), 60000);
+        console.log(` ⚠️  [Axolot Tunnel] Connection lost. Reconnecting in ${Math.round(nextDelay / 1000)}s...`);
         onDisconnect?.();
-        reconnectTimer = setTimeout(connect, 5000);
+        reconnectTimer = setTimeout(connect, nextDelay);
       });
 
-      ws.on('error', (err: Error) => {
+      ws.on('error', (err: any) => {
         if (stopped) return;
-        // Only log if it's not a routine connection refused during dev
-        if (!err.message.includes('ECONNREFUSED') && !err.message.includes('ENOTFOUND')) {
-          console.error(` [Axolot Tunnel] WebSocket error: ${err.message}`);
-        }
+        console.error(` [Axolot Tunnel] WebSocket error: ${err?.message || err} (Code: ${err?.code || 'unknown'})`, err?.stack || '');
       });
     }).catch((err) => {
       console.error(' [Axolot Tunnel] Failed to load ws module:', err.message);
@@ -181,6 +194,7 @@ export function startAxolotTunnel(options: AxolotTunnelOptions): () => void {
   return () => {
     stopped = true;
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
     if (ws) {
       ws.close();
       ws = null;

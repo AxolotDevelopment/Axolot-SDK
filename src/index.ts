@@ -37,6 +37,23 @@ async function getAstroFiles(dir: string): Promise<string[]> {
   return files.flat().filter(Boolean) as string[];
 }
 
+// Helper para realizar fetch con timeout y evitar bloqueos en el hilo principal de Astro
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 3000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
 // Helper para validar el token y los permisos
 async function validateRequest(req: any, res: any, requiredScope: 'filesystem:read' | 'filesystem:write'): Promise<boolean> {
   const authHeader = req.headers.authorization;
@@ -67,7 +84,7 @@ async function validateRequest(req: any, res: any, requiredScope: 'filesystem:re
 
   // Caso 2: Verificar contra la API central (p. ej. token de sesión del dashboard)
   try {
-    const checkRes = await fetch(`${apiUrl}/auth/me`, {
+    const checkRes = await fetchWithTimeout(`${apiUrl}/auth/me`, {
       headers: { 'Authorization': authHeader }
     });
 
@@ -115,6 +132,7 @@ export default function axolot(): AstroIntegration {
 
   let viteServer: any = null;
   let tunnelStarted = false;
+  let lastReportedPagesHash = '';
 
   return {
     name: '@axolot/sdk',
@@ -161,7 +179,11 @@ export default function axolot(): AstroIntegration {
                     req.on('end', async () => {
                       try {
                         const { filePath } = JSON.parse(body);
-                        const absolutePath = path.join(process.cwd(), filePath);
+                        const absolutePath = path.resolve(process.cwd(), filePath);
+                        if (!absolutePath.startsWith(process.cwd())) {
+                          res.statusCode = 403;
+                          return res.end(JSON.stringify({ error: 'Forbidden', message: 'Path traversal detected' }));
+                        }
                         const content = await fs.readFile(absolutePath, 'utf-8');
                         res.setHeader('Content-Type', 'application/json');
                         res.end(JSON.stringify({ content }));
@@ -180,7 +202,11 @@ export default function axolot(): AstroIntegration {
                     req.on('end', async () => {
                       try {
                         const { filePath, content } = JSON.parse(body);
-                        const absolutePath = path.join(process.cwd(), filePath);
+                        const absolutePath = path.resolve(process.cwd(), filePath);
+                        if (!absolutePath.startsWith(process.cwd())) {
+                          res.statusCode = 403;
+                          return res.end(JSON.stringify({ error: 'Forbidden', message: 'Path traversal detected' }));
+                        }
                         await fs.writeFile(absolutePath, content, 'utf-8');
                         res.setHeader('Content-Type', 'application/json');
                         res.end(JSON.stringify({ success: true }));
@@ -249,7 +275,12 @@ export default function axolot(): AstroIntegration {
             await scanPagesDir(pagesDir, discoveredPages);
             
             if (discoveredPages.length > 0) {
-              const res = await fetch(`${apiUrl}/sites/${siteId}/pages/report`, {
+              const currentHash = JSON.stringify(discoveredPages);
+              if (currentHash === lastReportedPagesHash) {
+                return;
+              }
+
+              const res = await fetchWithTimeout(`${apiUrl}/sites/${siteId}/pages/report`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -259,6 +290,9 @@ export default function axolot(): AstroIntegration {
               });
               const data = await res.json() as any;
               console.log(' [Axolot Bridge] Pages auto-synced successfully:', data);
+              if (data && data.success) {
+                lastReportedPagesHash = currentHash;
+              }
             }
           } catch (err: any) {
             console.error(' [Axolot Bridge] Error auto-syncing pages:', err.message);
@@ -342,7 +376,7 @@ export default function axolot(): AstroIntegration {
           } catch (e) {}
 
           try {
-            const res = await fetch(`${apiUrl}/sites/${siteId}`, {
+            const res = await fetchWithTimeout(`${apiUrl}/sites/${siteId}`, {
               headers: { 'Authorization': `Bearer ${apiToken}` }
             });
             if (res.ok) {
@@ -369,7 +403,7 @@ export default function axolot(): AstroIntegration {
             subdomain: chosenSubdomain,
             onConnect: async (tunnelUrl: string) => {
               try {
-                const patchRes = await fetch(`${apiUrl}/sites/${siteId}`, {
+                const patchRes = await fetchWithTimeout(`${apiUrl}/sites/${siteId}`, {
                   method: 'PATCH',
                   headers: {
                     'Content-Type': 'application/json',
@@ -391,7 +425,7 @@ export default function axolot(): AstroIntegration {
             console.log(' [Axolot Tunnel] Disconnecting tunnel...');
             stopTunnel();
             try {
-              await fetch(`${apiUrl}/sites/${siteId}`, {
+              await fetchWithTimeout(`${apiUrl}/sites/${siteId}`, {
                 method: 'PATCH',
                 headers: {
                   'Content-Type': 'application/json',
@@ -410,8 +444,174 @@ export default function axolot(): AstroIntegration {
           }
         }
 
+        async function generateLlmDocs() {
+          const siteId = process.env.PUBLIC_AXOLOT_SITE_ID || process.env.AXOLOT_SITE_ID;
+          const apiToken = process.env.PUBLIC_AXOLOT_API_TOKEN || process.env.AXOLOT_API_TOKEN;
+          const rawApiUrl = process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL;
+
+          if (!siteId || !apiToken) return;
+
+          let baseUrl = (rawApiUrl || 'http://localhost:3001').trim();
+          if (baseUrl.endsWith('/api/v1')) {
+            baseUrl = baseUrl.slice(0, -7);
+          } else if (baseUrl.endsWith('/api/v1/')) {
+            baseUrl = baseUrl.slice(0, -8);
+          }
+          baseUrl = baseUrl.replace(/\/$/, '');
+          const apiUrl = `${baseUrl}/api/v1`;
+
+          try {
+            const res = await fetchWithTimeout(`${apiUrl}/sites/${siteId}`, {
+              headers: { 'Authorization': `Bearer ${apiToken}` }
+            });
+            if (res.ok) {
+              const site = await res.json() as any;
+              const modules = (site.activeModules || []).map((m: any) => m.module?.name || 'desconocido');
+              const designTokensStr = JSON.stringify(site.designTokens || {}, null, 2);
+
+              const docContent = `# Axolot CMS — Contexto de IA para el Sitio Local
+
+Este archivo es autogenerado por el SDK de Axolot. Proporciona contexto en tiempo real para los asistentes de IA que trabajan en este proyecto.
+
+## Información de este Sitio
+- **Nombre**: ${site.name}
+- **ID de Sitio**: ${site.id}
+- **Plan de Suscripción**: ${site.plan || 'Free'}
+- **Estado**: ${site.status}
+- **Ruta de Trabajo Local**: ${site.localPath}
+
+## Módulos Activos (${modules.length})
+${modules.length > 0 ? modules.map((m: string) => `- \`${m}\``).join('\n') : 'Ninguno. (Puedes activar los módulos "blog", "shop", "bookings" o "seo" desde tu plan en el Dashboard de Axolot)'}
+
+> [!NOTE]
+> Reglas de Negocio de Módulos:
+> - Plan Free: Módulos estándar únicamente (sin tienda ni reservas).
+> - Plan Pro: Habilita el módulo de tienda ("shop") y el de reservas ("bookings").
+> - Plan Enterprise: Habilita entornos de Staging y bases de datos personalizadas.
+
+## Paleta de Colores y Tokens de Diseño (Design Tokens)
+\`\`\`json
+${designTokensStr}
+\`\`\`
+*Instrucción para la IA: Utiliza exclusivamente estos colores y valores tipográficos en los nuevos componentes para mantener la identidad visual del cliente.*
+
+## Guía de Desarrollo del SDK
+1. **Zonas Editables**: Para hacer que un título, párrafo, imagen o enlace sea editable por el usuario final, añade el atributo \`data-slot="seccion.campo"\`. Ejemplo:
+   \`\`\`html
+   <h1 data-slot="hero.title">Título</h1>
+   \`\`\`
+2. **Auto-Registro**: Cuando añadas un nuevo slot en tu código Astro, utiliza la herramienta MCP \`createSlot\` para registrar la clave (ej: \`hero.title\`) en la base de datos de Axolot.
+3. **Carga de Imágenes**: Usa la función helper \`getMediaUrl(path)\` del SDK para resolver las rutas de las imágenes subidas al gestor de medios del CMS.
+`;
+
+              const docPath = path.join(process.cwd(), 'llms-axolot.txt');
+              await fs.writeFile(docPath, docContent, 'utf-8');
+              console.log(' [Axolot SDK] llms-axolot.txt context file generated successfully.');
+            }
+          } catch (err: any) {
+            console.error(' [Axolot SDK] Failed to generate llms-axolot.txt:', err.message);
+          }
+        }
+
+        async function autoRegisterSlots() {
+          const siteId = process.env.PUBLIC_AXOLOT_SITE_ID || process.env.AXOLOT_SITE_ID;
+          const apiToken = process.env.PUBLIC_AXOLOT_API_TOKEN || process.env.AXOLOT_API_TOKEN;
+          const rawApiUrl = process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL;
+
+          if (!siteId || !apiToken) return;
+
+          let baseUrl = (rawApiUrl || 'http://localhost:3001').trim();
+          if (baseUrl.endsWith('/api/v1')) {
+            baseUrl = baseUrl.slice(0, -7);
+          } else if (baseUrl.endsWith('/api/v1/')) {
+            baseUrl = baseUrl.slice(0, -8);
+          }
+          baseUrl = baseUrl.replace(/\/$/, '');
+          const apiUrl = `${baseUrl}/api/v1`;
+
+          try {
+            const pagesRes = await fetchWithTimeout(`${apiUrl}/sites/${siteId}/pages`, {
+              headers: { 'Authorization': `Bearer ${apiToken}` }
+            });
+            if (!pagesRes.ok) return;
+            const pages = await pagesRes.json() as any[];
+
+            const srcDir = path.join(process.cwd(), 'src');
+            const files = await getAstroFiles(srcDir);
+
+            const slotsRes = await fetchWithTimeout(`${apiUrl}/sites/${siteId}/slots`, {
+              headers: { 'Authorization': `Bearer ${apiToken}` }
+            });
+            const existingSlots = slotsRes.ok ? await slotsRes.json() as any[] : [];
+            const existingKeys = new Set(existingSlots.map(s => s.key));
+
+            for (const file of files) {
+              const content = await fs.readFile(file, 'utf-8');
+              const slotRegex = /data-slot=["']([^"']+)["']/g;
+              let match;
+
+              const relativePath = path.relative(srcDir, file).replace(/\\/g, '/');
+              let pageId: string | undefined = undefined;
+              if (relativePath.startsWith('pages/')) {
+                const pagePart = relativePath.substring(6).replace(/\.astro$/, '');
+                const pageSlug = pagePart === 'index' ? '/' : `/${pagePart}`;
+                const page = pages.find(p => p.slug === pageSlug);
+                pageId = page?.id;
+              }
+
+              while ((match = slotRegex.exec(content)) !== null) {
+                const key = match[1];
+                if (!key) continue;
+                if (existingKeys.has(key)) continue;
+
+                let type: 'text' | 'image' | 'link' | 'richtext' = 'text';
+                const lowerKey = key.toLowerCase();
+                if (lowerKey.includes('image') || lowerKey.includes('img') || lowerKey.includes('logo') || lowerKey.includes('banner')) {
+                  type = 'image';
+                } else if (lowerKey.includes('link') || lowerKey.includes('url') || lowerKey.includes('cta')) {
+                  type = 'link';
+                }
+
+                const label = key
+                  .split('.')
+                  .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                  .join(' - ');
+
+                try {
+                  const regRes = await fetchWithTimeout(`${apiUrl}/sites/${siteId}/slots`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${apiToken}`
+                    },
+                    body: JSON.stringify({
+                      pageId,
+                      key,
+                      label,
+                      type,
+                      value: '',
+                      required: false
+                    })
+                  });
+
+                  if (regRes.ok) {
+                    console.log(` [Axolot Bridge] Auto-registered slot: "${key}" (${type})`);
+                    existingKeys.add(key);
+                  }
+                } catch (e: any) {
+                  console.error(` [Axolot Bridge] Error registering slot "${key}":`, e.message);
+                }
+              }
+            }
+          } catch (err: any) {
+            console.error(' [Axolot Bridge] Error in slot auto-registration:', err.message);
+          }
+        }
+
         reportPages();
         startTunnel();
+        generateLlmDocs();
+        autoRegisterSlots();
 
         // Listen for additions or deletions of astro/md/mdx files in src/pages
         if (viteServer) {
@@ -420,6 +620,16 @@ export default function axolot(): AstroIntegration {
             if (normFile.includes(normPagesDir) && /\.(astro|md|mdx)$/.test(normFile)) {
               console.log(' [Axolot Bridge] Page added, syncing...', path.basename(file));
               reportPages();
+            }
+            if (/\.astro$/.test(normFile)) {
+              autoRegisterSlots();
+            }
+          });
+
+          viteServer.watcher.on('change', (file: string) => {
+            const normFile = file.replace(/\\/g, '/');
+            if (/\.astro$/.test(normFile)) {
+              autoRegisterSlots();
             }
           });
           

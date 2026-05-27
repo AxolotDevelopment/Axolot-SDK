@@ -93,7 +93,23 @@ import { AxolotBridge } from '@axolot-ai/sdk/components';
 
 ### 5. Define Editable Slots
 
-Tag any element in your Astro templates. The SDK will register them automatically, making them immediately editable in the cloud.
+You have two ways to define editable slots for your clients:
+
+#### Option A: HTML Attributes (Recommended - Auto-registered)
+Simply tag any standard HTML element with the `data-slot` attribute. The SDK will scan, register, and update them automatically during development:
+
+```astro
+<header class="hero-section">
+  <!-- Dynamic text slot (Auto-registered as text) -->
+  <h1 data-slot="home.hero.title">Especialistas en tu sonrisa</h1>
+
+  <!-- Dynamic image slot (Auto-registered as image) -->
+  <img data-slot="home.hero.image" src="/logo.png" alt="Logo" />
+</header>
+```
+
+#### Option B: Slot Component (Explicit)
+Use the explicit `<Slot>` component:
 
 ```astro
 ---
@@ -101,10 +117,10 @@ import { Slot } from '@axolot-ai/sdk/components';
 ---
 
 <header class="hero-section">
-  <!-- Dynamic text slot -->
+  <!-- Explicit text slot -->
   <Slot id="home.hero.title" type="text" placeholder="Especialistas en tu sonrisa" />
   
-  <!-- Dynamic CTA link -->
+  <!-- Explicit CTA link -->
   <Slot id="home.hero.cta" type="link" placeholder="/contacto">
     <a class="btn-primary">¡Reservar cita!</a>
   </Slot>
