@@ -100,8 +100,15 @@ export interface AxolotTunnelOptions {
 export function startAxolotTunnel(options: AxolotTunnelOptions): () => void {
   const { port, host, subdomain, onConnect, onDisconnect } = options;
 
-  // Convert https:// → wss://, http:// → ws://
-  const wsBase = host.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+  // Convert protocol or prepend wss:// if missing
+  let wsBase = host;
+  if (/^https?:\/\//i.test(wsBase)) {
+    wsBase = wsBase.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+  } else if (!/^wss?:\/\//i.test(wsBase)) {
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    wsBase = isLocal ? `ws://${host}` : `wss://${host}`;
+  }
+  
   // Use PATH for subdomain so Apache doesn't strip it during WebSocket proxy
   const wsUrl = subdomain ? `${wsBase}/${encodeURIComponent(subdomain)}` : wsBase;
 
