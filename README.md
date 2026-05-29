@@ -39,7 +39,7 @@ yarn add @axolot-ai/sdk
 
 ### 2. Configure Astro
 
-Add the `axolot` integration to your [astro.config.mjs](file:///c:/Users/byhug/Desktop/Axolot_secret/sites/oaxhosting/astro.config.mjs):
+Add the `axolot` integration to your `astro.config.mjs`:
 
 ```javascript
 import { defineConfig } from 'astro/config';

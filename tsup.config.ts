@@ -5,6 +5,7 @@ export default defineConfig({
     index: 'src/index.ts',
     'lib/cms': 'src/lib/cms.ts',
     'components/index': 'src/components/index.ts',
+    middleware: 'src/middleware.ts',
   },
   format: ['esm'],
   dts: true,

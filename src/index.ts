@@ -137,7 +137,7 @@ export default function axolot(): AstroIntegration {
   return {
     name: '@axolot/sdk',
     hooks: {
-      'astro:config:setup': ({ injectScript, command, updateConfig }) => {
+      'astro:config:setup': async ({ injectScript, command, updateConfig, injectRoute }) => {
         console.log(' [Axolot SDK] Hook astro:config:setup triggered! command:', command);
         const isDev = command === 'dev';
         injectScript('page', `
@@ -159,6 +159,111 @@ export default function axolot(): AstroIntegration {
             });
           })();
         `);
+
+        // DYNAMIC i18n ROUTE INJECTION
+        const siteId = process.env.PUBLIC_AXOLOT_SITE_ID || process.env.AXOLOT_SITE_ID;
+        const apiToken = process.env.PUBLIC_AXOLOT_API_TOKEN || process.env.AXOLOT_API_TOKEN;
+        const rawApiUrl = process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL;
+        
+        let baseUrl = (rawApiUrl || 'http://localhost:3001').trim();
+        if (baseUrl.endsWith('/api/v1')) {
+          baseUrl = baseUrl.slice(0, -7);
+        } else if (baseUrl.endsWith('/api/v1/')) {
+          baseUrl = baseUrl.slice(0, -8);
+        }
+        baseUrl = baseUrl.replace(/\/$/, '');
+        const apiUrl = `${baseUrl}/api/v1`;
+
+        if (siteId && apiToken) {
+          try {
+            const res = await fetchWithTimeout(`${apiUrl}/sites/${siteId}/translations/settings`, {
+              headers: {
+                'Authorization': `Bearer ${apiToken}`
+              }
+            }, 500);
+            if (res.ok) {
+              const settings = await res.json() as any;
+              const languages = settings.languages || [];
+              const defaultLanguage = settings.defaultLanguage || 'en';
+
+              if (languages.length > 0) {
+                // Fetch existing translations to get route/slug mappings
+                let translations: any[] = [];
+                try {
+                  const transRes = await fetchWithTimeout(`${apiUrl}/sites/${siteId}/translations/`, {
+                    headers: { 'Authorization': `Bearer ${apiToken}` }
+                  }, 1000);
+                  if (transRes.ok) {
+                    translations = await transRes.json();
+                  }
+                } catch (e) {}
+
+                const pagesDir = path.join(process.cwd(), 'src', 'pages');
+                const files: string[] = [];
+
+                async function scan(dir: string) {
+                  try {
+                    const entries = await fs.readdir(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                      const fullPath = path.join(dir, entry.name);
+                      if (entry.isDirectory()) {
+                        // Skip folders that match any of our configured locales to avoid routes collision
+                        if (languages.includes(entry.name) || entry.name === defaultLanguage) continue;
+                        await scan(fullPath);
+                      } else if (entry.name.endsWith('.astro') || entry.name.endsWith('.md') || entry.name.endsWith('.mdx')) {
+                        const name = entry.name.replace(/\.(astro|md|mdx)$/, '');
+                        if (name.startsWith('_') || name.startsWith('.')) continue;
+                        files.push(fullPath);
+                      }
+                    }
+                  } catch (e) {}
+                }
+
+                await scan(pagesDir);
+
+                for (const file of files) {
+                  const relative = path.relative(pagesDir, file).replace(/\\/g, '/');
+                  const baseRoute = relative.replace(/\.(astro|md|mdx)$/, '');
+                  let routePattern = '';
+                  if (baseRoute === 'index') {
+                    routePattern = '/';
+                  } else if (baseRoute.endsWith('/index')) {
+                    routePattern = '/' + baseRoute.substring(0, baseRoute.length - 6);
+                  } else {
+                    routePattern = '/' + baseRoute;
+                  }
+
+                  for (const locale of languages) {
+                    // Match route translation (e.g. originalText === '/pricing')
+                    const normalizedOrig = routePattern.startsWith('/') ? routePattern : '/' + routePattern;
+                    const match = translations.find((t: any) => t.locale === locale && t.originalText === normalizedOrig);
+
+                    let translatedPath = routePattern;
+                    if (match && match.translatedText) {
+                      translatedPath = match.translatedText;
+                      if (!translatedPath.startsWith('/')) {
+                        translatedPath = '/' + translatedPath;
+                      }
+                    }
+
+                    // Avoid double slash
+                    const prefix = `/${locale}`;
+                    const suffix = translatedPath === '/' ? '' : translatedPath;
+                    const pattern = prefix + suffix;
+
+                    console.log(` [Axolot SDK] Dynamically injecting route: ${pattern} -> ${relative}`);
+                    injectRoute({
+                      pattern,
+                      entrypoint: file
+                    });
+                  }
+                }
+              }
+            }
+          } catch (e: any) {
+            console.log(' [Axolot Bridge] i18n route injection skipped:', e.message);
+          }
+        }
 
         // Register custom Vite plugin to inject the dev endpoints directly into Vite
         if (isDev) {

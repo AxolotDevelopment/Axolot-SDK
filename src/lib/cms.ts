@@ -7,7 +7,7 @@ export async function fetchFromCms(path: string, options: RequestInit = {}) {
   const defaultUrl = isDev ? 'http://127.0.0.1:3001' : 'https://api.axolotcms.com';
   
   const API_URL = (typeof process !== 'undefined' ? (process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL) : (import.meta.env?.PUBLIC_AXOLOT_API_URL || import.meta.env?.AXOLOT_API_URL)) || defaultUrl;
-  const token = (typeof process !== 'undefined' ? process.env.AXOLOT_API_TOKEN : import.meta.env?.AXOLOT_API_TOKEN);
+  const token = (typeof process !== 'undefined' ? (process.env.PUBLIC_AXOLOT_API_TOKEN || process.env.AXOLOT_API_TOKEN) : (import.meta.env?.PUBLIC_AXOLOT_API_TOKEN || import.meta.env?.AXOLOT_API_TOKEN));
 
   // Normalize base URL to prevent duplicate /api/v1
   let baseUrl = API_URL.trim();
@@ -53,7 +53,7 @@ export async function fetchFromCms(path: string, options: RequestInit = {}) {
 export function getMediaUrl(path: string | null | undefined) {
   if (!path) return ''
   if (path.startsWith('http')) return path
-  const API_URL = (typeof process !== 'undefined' ? process.env.AXOLOT_API_URL : import.meta.env?.AXOLOT_API_URL) || 'https://api.axolotcms.com';
+  const API_URL = (typeof process !== 'undefined' ? (process.env.PUBLIC_AXOLOT_API_URL || process.env.AXOLOT_API_URL) : (import.meta.env?.PUBLIC_AXOLOT_API_URL || import.meta.env?.AXOLOT_API_URL)) || 'https://api.axolotcms.com';
   return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
 }
 

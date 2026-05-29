@@ -6,6 +6,19 @@
     "type": "git",
     "url": "git+https://github.com/AxolotDevelopment/Axolot-SDK.git"
   },
+  "description": "The AI-Native Visual Headless CMS integration for Astro. Connect layouts with WebSocket tunnels and local MCP servers.",
+  "keywords": [
+    "astro",
+    "cms",
+    "headless-cms",
+    "visual-cms",
+    "visual-editor",
+    "mcp-server",
+    "model-context-protocol",
+    "ai-native",
+    "astro-integration",
+    "typescript"
+  ],
   "bugs": {
     "url": "https://github.com/AxolotDevelopment/Axolot-SDK/issues"
   },
@@ -25,6 +38,10 @@
     "./cms": {
       "types": "./dist/lib/cms.d.ts",
       "default": "./dist/lib/cms.js"
+    },
+    "./middleware": {
+      "types": "./dist/middleware.d.ts",
+      "default": "./dist/middleware.js"
     }
   },
   "files": [
